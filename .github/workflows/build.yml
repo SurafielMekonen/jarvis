@@ -10,28 +10,40 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
 
-      - uses: android-actions/setup-android@v3
-
-      - name: Android SDK-onderdelen
+      - name: Android SDK klaarzetten
         run: |
-          set +o pipefail
-          yes | sdkmanager "platforms;android-35" "build-tools;35.0.0" || true
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls "$ANDROID_HOME" || true
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ -x "$SDKM" ]; then
+            set +o pipefail
+            yes | "$SDKM" --licenses > /dev/null 2>&1 || true
+            "$SDKM" "platforms;android-35" "build-tools;35.0.0" > /dev/null 2>&1 || true
+          fi
+          true
 
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.9
 
       - name: Bouw debug-APK
-        run: gradle assembleDebug --no-daemon --stacktrace
+        run: gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
+
+      - name: Fouten zichtbaar maken
+        if: failure()
+        run: |
+          grep -E "^e: |error:|What went wrong|Could not|FAILED" -A2 build.log | head -60 | while IFS= read -r line; do
+            echo "::error::${line}"
+          done
 
       - name: Publiceer APK als release
         env:
