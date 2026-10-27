@@ -150,15 +150,27 @@ class JarvisService : Service() {
         else -> "onbekend"
     }
 
-    private fun listen(wakeMode: Boolean) {
-        if (stopped) return
-        recognizer?.destroy()
+    private var wakeModeNow = true
+    private var errorStreak = 0
+
+    private val startRunnable = Runnable { startNow() }
+
+    private fun destroyRecognizer() {
+        try {
+            recognizer?.destroy()
+        } catch (e: Exception) {
+            // al weg
+        }
+        recognizer = null
+    }
+
+    private fun ensureRecognizer(): SpeechRecognizer {
+        recognizer?.let { return it }
         val r = SpeechRecognizer.createSpeechRecognizer(this)
         recognizer = r
-
         r.setRecognitionListener(object : RecognitionListener {
             override fun onPartialResults(partialResults: Bundle?) {
-                if (!wakeMode || woke) return
+                if (!wakeModeNow || woke) return
                 val list = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: return
                 for (candidate in list) {
                     if (afterWakeWord(candidate) != null) {
@@ -170,8 +182,9 @@ class JarvisService : Service() {
             }
 
             override fun onResults(results: Bundle?) {
+                errorStreak = 0
                 val list = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: arrayListOf()
-                if (wakeMode) {
+                if (wakeModeNow) {
                     if (list.isNotEmpty()) JLog.add("Gehoord: " + list[0])
                     var command: String? = null
                     for (candidate in list) {
@@ -183,7 +196,7 @@ class JarvisService : Service() {
                             woke = false
                             JarvisUi.hide(0)
                         }
-                        restartWake(150)
+                        restartWake(600)
                     } else if (command.isBlank()) {
                         busy = true
                         woke = true
@@ -213,12 +226,19 @@ class JarvisService : Service() {
                 }
                 val quiet = error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
                 if (!quiet) JLog.add("Spraakfout: " + errorName(error))
-                if (wakeMode) {
+                // Bij echte fouten (o.a. 'server verbroken') de herkenner vers opbouwen, met oplopende wachttijd
+                var delay = 600L
+                if (!quiet) {
+                    errorStreak++
+                    destroyRecognizer()
+                    delay = minOf(1500L * errorStreak, 8000L)
+                }
+                if (wakeModeNow) {
                     if (woke) {
                         woke = false
                         JarvisUi.hide(0)
                     }
-                    restartWake(if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 1000L else 250L)
+                    restartWake(delay)
                 } else {
                     if (quiet) {
                         JarvisUi.show(this@JarvisService, OrbState.LISTENING, "Ik hoorde niets")
@@ -236,7 +256,26 @@ class JarvisService : Service() {
             override fun onEndOfSpeech() {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
+        return r
+    }
 
+    private fun listen(wakeMode: Boolean) {
+        if (stopped) return
+        wakeModeNow = wakeMode
+        main.removeCallbacks(startRunnable)
+        // Even wachten: een direct nieuwe sessie na de vorige veroorzaakt 'server verbroken'
+        main.postDelayed(startRunnable, 500)
+    }
+
+    private fun startNow() {
+        if (stopped) return
+        val wakeMode = wakeModeNow
+        val r = ensureRecognizer()
+        try {
+            r.cancel()
+        } catch (e: Exception) {
+            // negeren
+        }
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "nl-NL")
@@ -250,8 +289,9 @@ class JarvisService : Service() {
             r.startListening(intent)
         } catch (e: Exception) {
             JLog.add("Luisteren starten mislukt: " + e.message)
+            destroyRecognizer()
             if (!wakeMode) busy = false
-            restartWake(1000)
+            restartWake(1500)
         }
     }
 
@@ -306,7 +346,7 @@ class JarvisService : Service() {
         stopped = true
         main.removeCallbacksAndMessages(null)
         JarvisUi.hide(0)
-        recognizer?.destroy()
+        destroyRecognizer()
         tts?.shutdown()
         JLog.add("Jarvis gestopt")
         super.onDestroy()
