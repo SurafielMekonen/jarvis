@@ -41,19 +41,41 @@ class JarvisService : Service() {
 
     private val acks = listOf("Ja hoor.", "Oké.", "Momentje.", "Mm-hm, even kijken.", "Ja, komt eraan.", "Tuurlijk.", "Goed.")
 
-    /** Dempt de piepjes van de spraakherkenning terwijl Jarvis luistert. */
+    private val savedVolumes = HashMap<Int, Int>()
+
+    /** Dempt de piepjes van de spraakherkenning terwijl Jarvis luistert, en zet alles terug als hij praat. */
     private fun setMuted(on: Boolean) {
         if (on == muted) return
         if (on && !Prefs(this).muteBeeps) return
         muted = on
         val am = getSystemService(AudioManager::class.java)
-        val dir = if (on) AudioManager.ADJUST_MUTE else AudioManager.ADJUST_UNMUTE
-        for (stream in intArrayOf(AudioManager.STREAM_NOTIFICATION, AudioManager.STREAM_SYSTEM, AudioManager.STREAM_MUSIC)) {
+        val streams = intArrayOf(
+            AudioManager.STREAM_NOTIFICATION, AudioManager.STREAM_SYSTEM, AudioManager.STREAM_MUSIC, 10
+        )
+        for (stream in streams) {
             try {
-                am.adjustStreamVolume(stream, dir, 0)
+                if (on) {
+                    savedVolumes[stream] = am.getStreamVolume(stream)
+                    am.adjustStreamVolume(stream, AudioManager.ADJUST_MUTE, 0)
+                    am.setStreamVolume(stream, 0, 0)
+                } else {
+                    am.adjustStreamVolume(stream, AudioManager.ADJUST_UNMUTE, 0)
+                    val v = savedVolumes[stream]
+                    if (v != null && v > 0) am.setStreamVolume(stream, v, 0)
+                }
             } catch (e: Exception) {
                 // sommige telefoons staan dit niet toe
             }
+        }
+    }
+
+    /** Eerst het geluid terugzetten en dan pas praten, anders blijft de stem stil. */
+    private fun whenAudible(block: () -> Unit) {
+        if (muted) {
+            setMuted(false)
+            main.postDelayed({ if (!stopped) block() }, 350)
+        } else {
+            block()
         }
     }
 
@@ -65,10 +87,7 @@ class JarvisService : Service() {
         listen(false)
     }
 
-    private val wakeWords = listOf(
-        "jarvis", "jarvies", "harvis", "jervis", "jarvist", "tarvis", "jarvus",
-        "charvis", "jarvas", "jarfis", "garvis", "jarves"
-    )
+    private val wakeWords = listOf("jarvis", "jarvies", "jervis", "harvis", "jarvist", "jarvus")
 
     private val restartRunnable = Runnable {
         if (!stopped && !busy) listen(true)
@@ -123,7 +142,7 @@ class JarvisService : Service() {
         val engine = tts ?: return
         engine.setAudioAttributes(
             AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                .setUsage(AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                 .build()
         )
@@ -136,12 +155,14 @@ class JarvisService : Service() {
         JLog.add(if (ttsReady) "Stem klaar" else "Geen bruikbare stem gevonden")
 
         engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String?) {}
+            override fun onStart(utteranceId: String?) {
+                JLog.add("Spreekt: " + utteranceId)
+            }
 
             override fun onDone(utteranceId: String?) {
                 main.post {
                     when (utteranceId) {
-                        "reply" -> if (followUp) startFollowUp() else finishTurn(1200)
+                        "reply" -> if (followUp) startFollowUp() else finishTurn(250)
                         "listen" -> {
                             main.removeCallbacks(speakWatchdog)
                             listen(false)
@@ -170,7 +191,11 @@ class JarvisService : Service() {
         val lower = text.lowercase(Locale.ROOT)
         for (w in wakeWords) {
             val i = lower.indexOf(w)
-            if (i >= 0) return text.substring(i + w.length).trim(' ', ',', '.', '!', '?')
+            if (i < 0) continue
+            // Het woord moet vooraan staan (hooguit twee woorden ervoor, zoals "hé" of "hallo")
+            val before = lower.substring(0, i).trim().split(" ").filter { it.isNotEmpty() }
+            if (before.size > 2) continue
+            return text.substring(i + w.length).trim(' ', ',', '.', '!', '?')
         }
         return null
     }
@@ -233,6 +258,7 @@ class JarvisService : Service() {
                         command = afterWakeWord(candidate)
                         if (command != null) break
                     }
+                    if (command != null) JLog.add("Wakker door: " + list.firstOrNull())
                     if (command == null) {
                         if (woke) {
                             woke = false
@@ -244,10 +270,9 @@ class JarvisService : Service() {
                         woke = true
                         JarvisUi.show(this@JarvisService, OrbState.LISTENING, "Ja?")
                         if (ttsReady) {
-                            setMuted(false)
                             main.removeCallbacks(speakWatchdog)
                             main.postDelayed(speakWatchdog, 12_000L)
-                            tts?.speak("Ja?", TextToSpeech.QUEUE_FLUSH, null, "listen")
+                            whenAudible { tts?.speak("Ja?", TextToSpeech.QUEUE_FLUSH, null, "listen") }
                         } else {
                             listen(false)
                         }
@@ -365,8 +390,7 @@ class JarvisService : Service() {
         JarvisUi.show(this, OrbState.THINKING, text)
         main.removeCallbacks(speakWatchdog)
         main.postDelayed(speakWatchdog, 90_000L)
-        setMuted(false)
-        if (ttsReady) tts?.speak(acks.random(), TextToSpeech.QUEUE_FLUSH, null, "ack")
+        if (ttsReady) whenAudible { tts?.speak(acks.random(), TextToSpeech.QUEUE_FLUSH, null, "ack") }
         Thread {
             val reply = try {
                 Brain.ask(applicationContext, text)
@@ -387,13 +411,14 @@ class JarvisService : Service() {
             return
         }
         followUp = reply.trimEnd().endsWith("?")
-        setMuted(false)
         main.removeCallbacks(speakWatchdog)
         main.postDelayed(speakWatchdog, 60_000L)
-        val res = engine.speak(reply, TextToSpeech.QUEUE_ADD, null, "reply")
-        if (res != TextToSpeech.SUCCESS) {
-            JLog.add("Praten mislukt")
-            finishTurn(3500)
+        whenAudible {
+            val res = engine.speak(reply, TextToSpeech.QUEUE_ADD, null, "reply")
+            if (res != TextToSpeech.SUCCESS) {
+                JLog.add("Praten mislukt")
+                finishTurn(3500)
+            }
         }
     }
 
