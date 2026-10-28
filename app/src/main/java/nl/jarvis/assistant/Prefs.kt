@@ -43,6 +43,18 @@ class Prefs(context: Context) {
             sp.edit().putString("language", v).apply()
         }
 
+    var azureKey: String
+        get() = sp.getString("azure_key", "") ?: ""
+        set(v) {
+            sp.edit().putString("azure_key", v.trim()).apply()
+        }
+
+    var azureRegion: String
+        get() = sp.getString("azure_region", "westeurope") ?: "westeurope"
+        set(v) {
+            sp.edit().putString("azure_region", v.trim().ifEmpty { "westeurope" }).apply()
+        }
+
     companion object {
         const val DEFAULT_MODEL = "claude-sonnet-5-5"
     }

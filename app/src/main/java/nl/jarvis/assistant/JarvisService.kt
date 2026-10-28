@@ -418,7 +418,7 @@ class JarvisService : Service() {
         JarvisUi.show(this, OrbState.THINKING, text)
         main.removeCallbacks(speakWatchdog)
         main.postDelayed(speakWatchdog, 90_000L)
-        if (ttsReady) whenAudible { tts?.speak(acks.random(), TextToSpeech.QUEUE_FLUSH, null, "ack") }
+        whenAudible { sayText(acks.random(), "ack", true) }
         Thread {
             val reply = try {
                 Brain.ask(applicationContext, text, alts)
@@ -434,6 +434,15 @@ class JarvisService : Service() {
         if (!busy) return
         JLog.add("Onderbroken door tik op de ring")
         tts?.stop()
+        try {
+            mediaPlayer?.stop()
+            mediaPlayer?.release()
+        } catch (e: Exception) {
+            // negeren
+        }
+        mediaPlayer = null
+        azureQueue.clear()
+        azureBusy = false
         main.removeCallbacks(speakWatchdog)
         followUp = false
         finishTurn(0)
@@ -442,8 +451,7 @@ class JarvisService : Service() {
     private fun speak(reply: String) {
         JLog.add("Antwoord: $reply")
         JarvisUi.show(this, OrbState.SPEAKING, reply)
-        val engine = tts
-        if (engine == null || !ttsReady) {
+        if (Prefs(this).azureKey.isBlank() && (tts == null || !ttsReady)) {
             JLog.add("Kan niet praten: stem niet gereed")
             finishTurn(3500)
             return
@@ -451,13 +459,7 @@ class JarvisService : Service() {
         followUp = reply.trimEnd().endsWith("?")
         main.removeCallbacks(speakWatchdog)
         main.postDelayed(speakWatchdog, minOf(60_000L, 5_000L + reply.length * 110L))
-        whenAudible {
-            val res = engine.speak(reply, TextToSpeech.QUEUE_ADD, null, "reply")
-            if (res != TextToSpeech.SUCCESS) {
-                JLog.add("Praten mislukt")
-                finishTurn(3500)
-            }
-        }
+        whenAudible { sayText(reply, "reply", false) }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -471,6 +473,12 @@ class JarvisService : Service() {
         JarvisUi.hide(0)
         destroyRecognizer()
         setMuted(false)
+        try {
+            mediaPlayer?.stop()
+            mediaPlayer?.release()
+        } catch (e: Exception) {
+            // negeren
+        }
         tts?.shutdown()
         JLog.add("Jarvis gestopt")
         super.onDestroy()

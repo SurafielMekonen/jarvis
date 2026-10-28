@@ -72,6 +72,53 @@ class MainActivity : Activity() {
         model.setText(prefs.model)
         col.addView(model)
 
+        label("Azure Speech sleutel (optioneel, voor een natuurlijke mannenstem)")
+        val azureKey = EditText(this)
+        azureKey.setText(prefs.azureKey)
+        azureKey.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        col.addView(azureKey)
+
+        label("Azure regio (bijvoorbeeld westeurope)")
+        val azureRegion = EditText(this)
+        azureRegion.setText(prefs.azureRegion)
+        col.addView(azureRegion)
+
+        fun saveKeys() {
+            prefs.claudeKey = claude.text.toString()
+            prefs.model = model.text.toString()
+            prefs.azureKey = azureKey.text.toString()
+            prefs.azureRegion = azureRegion.text.toString()
+        }
+
+        button("Test Azure-stem") {
+            saveKeys()
+            if (prefs.azureKey.isBlank()) {
+                Toast.makeText(this, "Vul eerst een Azure-sleutel in.", Toast.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(this, "Bezig met ophalen…", Toast.LENGTH_SHORT).show()
+                Thread {
+                    val audio = AzureTts.synthesize(prefs.azureKey, prefs.azureRegion, "Goedenavond. Ik ben Jarvis, tot uw dienst.", prefs.language)
+                    runOnUiThread {
+                        if (audio == null) {
+                            Toast.makeText(this, "Dat lukte niet. Controleer de sleutel en de regio.", Toast.LENGTH_LONG).show()
+                        } else {
+                            try {
+                                val f = java.io.File.createTempFile("jarvis_test", ".mp3", cacheDir)
+                                f.writeBytes(audio)
+                                val mp = android.media.MediaPlayer()
+                                mp.setDataSource(f.absolutePath)
+                                mp.setOnCompletionListener { it.release(); f.delete() }
+                                mp.setOnPreparedListener { it.start() }
+                                mp.prepareAsync()
+                            } catch (e: Exception) {
+                                Toast.makeText(this, "Afspelen mislukte: " + e.message, Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    }
+                }.start()
+            }
+        }
+
         label("Stap 1: toestemmingen")
         button("Geef toestemmingen") { requestPermissions(perms, 1) }
         button("Toestaan: over andere apps heen tonen") {
@@ -149,8 +196,7 @@ class MainActivity : Activity() {
         result.setPadding(0, 16, 0, 16)
 
         button("Test Claude (zonder stem)") {
-            prefs.claudeKey = claude.text.toString()
-            prefs.model = model.text.toString()
+            saveKeys()
             val question = testInput.text.toString()
             result.text = "Bezig…"
             Thread {
@@ -205,8 +251,7 @@ class MainActivity : Activity() {
 
         label("Stap 3: starten")
         button("Opslaan en Jarvis starten") {
-            prefs.claudeKey = claude.text.toString()
-            prefs.model = model.text.toString()
+            saveKeys()
             if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                 Toast.makeText(this, "Geef eerst de toestemmingen (stap 1).", Toast.LENGTH_LONG).show()
             } else {
