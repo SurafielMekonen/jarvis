@@ -18,7 +18,7 @@ object Brain {
     @Volatile
     private var webSearch = true
 
-    private fun systemPrompt(): String =
+    private fun systemPrompt(ctx: Context): String =
         "Je bent Jarvis, de persoonlijke spraakassistent van de gebruiker op zijn Android-telefoon. " +
             "Je praat als een warm, slim mens en niet als een robot: gebruik natuurlijke Nederlandse spreektaal, " +
             "met af en toe een kort tussenwoord zoals 'Ja hoor', 'Oké', 'Mm, goed idee' of 'Even kijken'. " +
@@ -40,8 +40,19 @@ object Brain {
             "\n\nPROFIELEN: Vraagt de gebruiker om een persoon of profiel op een social-app te zoeken, gebruik dan find_profiles " +
             "en noem daarna precies welke profielen of namen op het scherm stonden, bijvoorbeeld 'Ik vond drie profielen: ...'. " +
             "Verzin nooit namen die niet in het resultaat staan. " +
+            "\n\nAPPS BEDIENEN: Je kunt in apps tikken, typen en scrollen. Werkwijze: open_app, dan read_screen, kies het juiste nummer " +
+            "met click_item (of click_text), typ met type_text en lees het scherm opnieuw na elke stap. Zoek je iets in een app (zoals een profiel op TikTok), " +
+            "tik dan op het zoekicoon, typ de naam met submit=true, kies indien nodig het tabblad Gebruikers of Accounts, lees het scherm en noem precies " +
+            "de profielen die je ziet, bijvoorbeeld 'Ik vond drie profielen: ...'. Open nooit de browser voor iets dat in een app kan. " +
+            "Klik je op een video, chat of profiel, doe dat gewoon en meld het kort. Berichten typen en versturen in een app doe je pas na bevestiging van de gebruiker. " +
+            "\n\nVERSTAAN: De spraakherkenning maakt fouten, vooral bij namen en vreemde woorden. Je krijgt soms alternatieve versies van wat er gehoord is. " +
+            "Kies wat het meest logisch is op basis van klank en context (Sophy, Sofie en Sophie zijn mogelijk dezelfde naam). Is het echt onduidelijk, " +
+            "vraag dan kort 'Bedoel je ...?'. " +
+            "\n\nLEREN: Je wordt steeds beter. Gebruik remember om blijvend te onthouden: voorkeuren van de gebruiker, hoe namen worden bedoeld " +
+            "(bijvoorbeeld 'Sophy = contact Sofie'), correcties wanneer de gebruiker zegt dat iets fout was, en wat in een app werkte " +
+            "(bijvoorbeeld 'TikTok: zoekicoon heet Zoeken'). Doe dat stil, zonder erover te praten. Zeg na een afgeronde taak niets extra's en stel geen vraag, tenzij je echt iets nodig hebt. " +
             "\n\nWacht je op een antwoord van de gebruiker, eindig dan met een vraag (met een vraagteken). " +
-            "Het is nu " + ZonedDateTime.now().toString() + "."
+            "Het is nu " + ZonedDateTime.now().toString() + "." + Memory.asPrompt(ctx)
 
     private fun post(key: String, body: String): Pair<Int, String> {
         val conn = URL("https://api.anthropic.com/v1/messages").openConnection() as HttpURLConnection
@@ -94,19 +105,21 @@ object Brain {
     }
 
     @Synchronized
-    fun ask(ctx: Context, userText: String): String {
+    fun ask(ctx: Context, userText: String, alternatives: List<String> = emptyList()): String {
         val prefs = Prefs(ctx)
         if (prefs.claudeKey.isBlank()) return "Er is nog geen Claude API sleutel ingesteld."
 
         // Werkkopie van het gesprek voor alleen deze beurt
         val msgs = JSONArray(history.toString())
-        msgs.put(JSONObject().put("role", "user").put("content", userText))
-        val system = systemPrompt()
+        val heard = if (alternatives.isEmpty()) userText else
+            userText + "\n(Spraakherkenning twijfelde, andere mogelijke versies: " + alternatives.joinToString(" | ") + ")"
+        msgs.put(JSONObject().put("role", "user").put("content", heard))
+        val system = systemPrompt(ctx)
 
         try {
             var attempts = 0
             var round = 0
-            while (round < 8) {
+            while (round < 16) {
                 val body = JSONObject()
                     .put("model", prefs.model)
                     .put("max_tokens", 2048)

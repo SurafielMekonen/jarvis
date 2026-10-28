@@ -151,6 +151,20 @@ class JarvisService : Service() {
             JLog.add("Nederlandse stem ontbreekt, ik probeer de standaardtaal van je telefoon")
             r = engine.setLanguage(Locale.getDefault())
         }
+        try {
+            val wanted = Prefs(this).voiceName
+            val nl = engine.voices?.filter { it.locale.language == "nl" } ?: emptyList()
+            val pick = (if (wanted.isNotEmpty()) nl.firstOrNull { it.name == wanted } else null)
+                ?: nl.firstOrNull { Regex("(?<!fe)male", RegexOption.IGNORE_CASE).containsMatchIn(it.name) }
+            if (pick != null) {
+                engine.voice = pick
+                JLog.add("Stem: " + pick.name)
+            }
+        } catch (e: Exception) {
+            JLog.add("Stem kiezen mislukt")
+        }
+        engine.setPitch(0.82f)
+        engine.setSpeechRate(0.96f)
         ttsReady = !(r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED)
         JLog.add(if (ttsReady) "Stem klaar" else "Geen bruikbare stem gevonden")
 
@@ -218,6 +232,7 @@ class JarvisService : Service() {
     }
 
     private var wakeModeNow = true
+    private var useOffline = true
     private var errorStreak = 0
 
     private val startRunnable = Runnable { startNow() }
@@ -254,9 +269,11 @@ class JarvisService : Service() {
                 if (wakeModeNow) {
                     if (list.isNotEmpty()) JLog.add("Gehoord: " + list[0])
                     var command: String? = null
+                    val alts = ArrayList<String>()
                     for (candidate in list) {
-                        command = afterWakeWord(candidate)
-                        if (command != null) break
+                        val c = afterWakeWord(candidate)
+                        if (c == null) continue
+                        if (command == null) command = c else if (c.isNotBlank() && c != command && c !in alts) alts.add(c)
                     }
                     if (command != null) JLog.add("Wakker door: " + list.firstOrNull())
                     if (command == null) {
@@ -277,7 +294,7 @@ class JarvisService : Service() {
                             listen(false)
                         }
                     } else {
-                        process(command)
+                        process(command, alts)
                     }
                 } else {
                     val text = list.firstOrNull()
@@ -286,7 +303,7 @@ class JarvisService : Service() {
                         JarvisUi.show(this@JarvisService, OrbState.LISTENING, "Ik hoorde niets")
                         finishTurn(1500)
                     } else {
-                        process(text)
+                        process(text, list.drop(1).distinct())
                     }
                 }
             }
@@ -297,6 +314,10 @@ class JarvisService : Service() {
                     JarvisUi.show(this@JarvisService, OrbState.LISTENING, "Geen microfoontoestemming voor Jarvis.")
                     JarvisUi.hide(4000)
                     return
+                }
+                if ((error == 12 || error == 13) && useOffline) {
+                    useOffline = false
+                    JLog.add("Offline herkenning niet beschikbaar, ik gebruik de online versie")
                 }
                 val quiet = error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
                 if (!quiet) JLog.add("Spraakfout: " + errorName(error))
@@ -360,6 +381,7 @@ class JarvisService : Service() {
             intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
             intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
         }
+        if (wakeMode && useOffline) intent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
         setMuted(true)
         try {
             r.startListening(intent)
@@ -384,7 +406,7 @@ class JarvisService : Service() {
         restartWake(400)
     }
 
-    private fun process(text: String) {
+    private fun process(text: String, alts: List<String> = emptyList()) {
         busy = true
         JLog.add("Opdracht: $text")
         JarvisUi.show(this, OrbState.THINKING, text)
@@ -393,7 +415,7 @@ class JarvisService : Service() {
         if (ttsReady) whenAudible { tts?.speak(acks.random(), TextToSpeech.QUEUE_FLUSH, null, "ack") }
         Thread {
             val reply = try {
-                Brain.ask(applicationContext, text)
+                Brain.ask(applicationContext, text, alts)
             } catch (e: Exception) {
                 "Er ging iets mis: " + e.message
             }
@@ -412,7 +434,7 @@ class JarvisService : Service() {
         }
         followUp = reply.trimEnd().endsWith("?")
         main.removeCallbacks(speakWatchdog)
-        main.postDelayed(speakWatchdog, 60_000L)
+        main.postDelayed(speakWatchdog, minOf(60_000L, 5_000L + reply.length * 110L))
         whenAudible {
             val res = engine.speak(reply, TextToSpeech.QUEUE_ADD, null, "reply")
             if (res != TextToSpeech.SUCCESS) {

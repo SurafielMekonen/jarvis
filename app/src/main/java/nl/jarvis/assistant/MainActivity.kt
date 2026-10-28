@@ -101,6 +101,36 @@ class MainActivity : Activity() {
         }
         col.addView(muteBtn)
 
+        button("Andere stem proberen (kies een mannelijke)") {
+            var eng: TextToSpeech? = null
+            eng = TextToSpeech(applicationContext) { st ->
+                runOnUiThread {
+                    val e = eng
+                    if (st != TextToSpeech.SUCCESS || e == null) {
+                        Toast.makeText(this, "Stem starten mislukt.", Toast.LENGTH_LONG).show()
+                    } else {
+                        val nl = e.voices?.filter { it.locale.language == "nl" }?.sortedBy { it.name } ?: emptyList()
+                        if (nl.isEmpty()) {
+                            Toast.makeText(this, "Geen Nederlandse stemmen gevonden. Gebruik Stem-instellingen.", Toast.LENGTH_LONG).show()
+                        } else {
+                            val idx = (nl.indexOfFirst { it.name == prefs.voiceName } + 1) % nl.size
+                            val v = nl[idx]
+                            e.voice = v
+                            e.setPitch(0.82f)
+                            e.setSpeechRate(0.96f)
+                            prefs.voiceName = v.name
+                            Toast.makeText(this, "Stem " + (idx + 1) + " van " + nl.size + ": " + v.name + ". Tik nog eens voor de volgende. Stop en start Jarvis om te gebruiken.", Toast.LENGTH_LONG).show()
+                            e.speak("Goedenavond. Ik ben Jarvis, tot uw dienst.", TextToSpeech.QUEUE_FLUSH, null, "voice")
+                        }
+                    }
+                }
+            }
+        }
+        button("Wat heeft Jarvis geleerd?") {
+            val n = Memory.notes(this)
+            AlertDialogShow.show(this, if (n.isEmpty()) "Nog niets geleerd." else n.joinToString("\n- ", "- "))
+        }
+
         label("Stap 2: testen")
         val testInput = EditText(this)
         testInput.hint = "Typ een opdracht, bijvoorbeeld: wat is 12 keer 12"

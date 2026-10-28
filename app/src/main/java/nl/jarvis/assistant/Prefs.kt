@@ -23,6 +23,19 @@ class Prefs(context: Context) {
             sp.edit().putBoolean("mute_beeps", v).apply()
         }
 
+    var voiceName: String
+        get() = sp.getString("voice_name", "") ?: ""
+        set(v) {
+            sp.edit().putString("voice_name", v).apply()
+        }
+
+    /** Wat Jarvis over jou en je telefoon heeft geleerd, één notitie per regel. */
+    var memory: String
+        get() = sp.getString("memory", "") ?: ""
+        set(v) {
+            sp.edit().putString("memory", v).apply()
+        }
+
     companion object {
         const val DEFAULT_MODEL = "claude-sonnet-5-5"
     }

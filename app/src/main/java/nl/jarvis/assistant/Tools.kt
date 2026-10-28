@@ -118,25 +118,24 @@ object Tools {
                 listOf("platform", "to", "message")
             )
         )
-        tools.put(
-            tool(
-                "find_profiles",
-                "Zoek profielen/personen op een social-app (tiktok, instagram, x, facebook, linkedin, threads) en lees de zichtbare resultaten van het scherm. Geeft de gevonden namen terug.",
-                JSONObject()
-                    .put("platform", prop("string", "tiktok, instagram, x, facebook, linkedin of threads"))
-                    .put("name", prop("string", "Naam om te zoeken")),
-                listOf("platform", "name")
-            )
-        )
+        tools.put(tool("read_screen", "Lees wat er nu op het scherm van de telefoon staat, als genummerde lijst. Gebruik dit na elke handeling om te zien wat er gebeurde.", JSONObject(), listOf()))
+        tools.put(tool("click_item", "Tik op een genummerd onderdeel van de laatst gelezen schermlijst (bijvoorbeeld de eerste video, een profiel of een chat).",
+            JSONObject().put("number", prop("integer", "Nummer uit de schermlijst")), listOf("number")))
+        tools.put(tool("click_text", "Tik op iets op het scherm aan de hand van zijn tekst of naam (bijvoorbeeld Zoeken, Gebruikers, Verzenden).",
+            JSONObject().put("text", prop("string", "Tekst of naam")), listOf("text")))
+        tools.put(tool("type_text", "Typ tekst in het tekstveld dat nu actief is (eerst op het zoek- of typveld tikken). Met submit=true wordt Enter/Zoeken ingedrukt.",
+            JSONObject().put("text", prop("string", "Tekst")).put("submit", prop("boolean", "Daarna bevestigen/zoeken")), listOf("text")))
+        tools.put(tool("scroll", "Scroll het scherm omlaag of omhoog.",
+            JSONObject().put("direction", prop("string", "down of up")), listOf("direction")))
+        tools.put(tool("press_button", "Druk op een knop van de telefoon: back, home of recents.",
+            JSONObject().put("button", prop("string", "back, home of recents")), listOf("button")))
+        tools.put(tool("remember", "Onthoud iets blijvend om steeds beter te worden: voorkeuren, namen en bijnamen, correcties van de gebruiker, en wat in een app werkte.",
+            JSONObject().put("note", prop("string", "Korte notitie, één zin")), listOf("note")))
+        tools.put(tool("forget", "Vergeet een eerder onthouden notitie.",
+            JSONObject().put("contains", prop("string", "Een stukje tekst uit de notitie")), listOf("contains")))
         tools.put(
             tool(
                 "lock_screen", "Vergrendel het scherm van de telefoon (ook te gebruiken als de gebruiker vraagt de telefoon uit te zetten).",
-                JSONObject(), listOf()
-            )
-        )
-        tools.put(
-            tool(
-                "read_screen", "Lees de tekst van het scherm dat nu open staat op de telefoon.",
                 JSONObject(), listOf()
             )
         )
@@ -175,8 +174,14 @@ object Tools {
             "post_social" -> postSocial(ctx, a.getString("platform"), a.getString("text"))
             "send_social_message" -> sendSocialMessage(ctx, a.getString("platform"), a.getString("to"), a.getString("message"))
             "call_contact" -> call(ctx, a.getString("to"))
-            "find_profiles" -> findProfiles(ctx, a.getString("platform"), a.getString("name"))
-            "read_screen" -> readScreen()
+            "read_screen" -> ui { Thread.sleep(1800); it.describeScreen() }
+            "click_item" -> ui { val r = it.clickItem(a.getInt("number")); Thread.sleep(1800); r + "\n" + it.describeScreen() }
+            "click_text" -> ui { val r = it.clickText(a.getString("text")); Thread.sleep(1800); r + "\n" + it.describeScreen() }
+            "type_text" -> ui { val r = it.typeInto(a.getString("text"), a.optBoolean("submit", false)); Thread.sleep(2200); r + "\n" + it.describeScreen() }
+            "scroll" -> ui { val r = it.scroll(a.optString("direction", "down") != "up"); Thread.sleep(1200); r + "\n" + it.describeScreen() }
+            "press_button" -> ui { val r = it.press(a.getString("button")); Thread.sleep(1500); r + "\n" + it.describeScreen() }
+            "remember" -> Memory.add(ctx, a.getString("note"))
+            "forget" -> Memory.forget(ctx, a.getString("contains"))
             "lock_screen" -> {
                 val svc = JarvisAccessibilityService.instance
                 if (svc == null) "De Jarvis-toegankelijkheid staat uit, dus ik kan het scherm niet vergrendelen."
@@ -240,7 +245,50 @@ object Tools {
                 cursor.close()
             }
         }
+        if (found == null) found = fuzzyContact(ctx, who)
         return found
+    }
+
+    private fun distance(a: String, b: String): Int {
+        val dp = IntArray(b.length + 1) { it }
+        for (i in 1..a.length) {
+            var prev = dp[0]
+            dp[0] = i
+            for (j in 1..b.length) {
+                val tmp = dp[j]
+                dp[j] = minOf(dp[j] + 1, dp[j - 1] + 1, prev + if (a[i - 1] == b[j - 1]) 0 else 1)
+                prev = tmp
+            }
+        }
+        return dp[b.length]
+    }
+
+    /** Zoekt het contact dat het best klinkt als de gehoorde naam (spraakherkenning maakt fouten). */
+    private fun fuzzyContact(ctx: Context, who: String): String? {
+        val cursor = ctx.contentResolver.query(
+            ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+            arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER),
+            null, null, null
+        ) ?: return null
+        var best: String? = null
+        var bestScore = 3
+        try {
+            val target = who.lowercase(Locale.ROOT).replace("ph", "f").replace("y", "ie")
+            while (cursor.moveToNext()) {
+                val name = cursor.getString(0)?.lowercase(Locale.ROOT) ?: continue
+                for (part in listOf(name) + name.split(" ")) {
+                    val norm = part.replace("ph", "f").replace("y", "ie")
+                    val sc = distance(target, norm)
+                    if (sc < bestScore) {
+                        bestScore = sc
+                        best = cursor.getString(1).filter { it.isDigit() || it == '+' }
+                    }
+                }
+            }
+        } finally {
+            cursor.close()
+        }
+        return best
     }
 
     private fun sendSms(ctx: Context, to: String, msg: String): String {
@@ -330,49 +378,10 @@ object Tools {
         return launch(ctx, shareIntent(pkg, msg), "Bericht aan $to wordt verstuurd via $platform.")
     }
 
-    private fun readScreen(): String {
+    private fun ui(block: (JarvisAccessibilityService) -> String): String {
         val svc = JarvisAccessibilityService.instance
-            ?: return "De Jarvis-toegankelijkheid staat uit, dus ik kan het scherm niet lezen."
-        val t = svc.readScreenText()
-        return if (t.isBlank()) "Ik zie geen tekst op het scherm." else t
-    }
-
-    /** Opent de zoekpagina voor profielen in de app en leest de zichtbare namen van het scherm. */
-    private fun findProfiles(ctx: Context, platform: String, name: String): String {
-        val p = platform.lowercase(Locale.ROOT)
-        val q = enc(name)
-        val url = when (p) {
-            "tiktok" -> "https://www.tiktok.com/search/user?q=$q"
-            "instagram" -> "https://www.instagram.com/explore/search/keyword/?q=$q"
-            "x", "twitter" -> "https://x.com/search?q=$q&f=user"
-            "facebook" -> "https://www.facebook.com/search/people/?q=$q"
-            "linkedin" -> "https://www.linkedin.com/search/results/people/?keywords=$q"
-            "threads" -> "https://www.threads.net/search?q=$q&serp_type=accounts"
-            else -> return "Profielen zoeken op $platform wordt niet ondersteund."
-        }
-        if (JarvisAccessibilityService.instance == null) {
-            return "De Jarvis-toegankelijkheid staat uit, dus ik kan de resultaten niet lezen."
-        }
-        val pkg = when (p) {
-            "tiktok" -> "com.zhiliaoapp.musically"
-            "instagram" -> "com.instagram.android"
-            "x", "twitter" -> "com.twitter.android"
-            "facebook" -> "com.facebook.katana"
-            "linkedin" -> "com.linkedin.android"
-            else -> "com.instagram.barcelona"
-        }
-        val i = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-        i.setPackage(pkg)
-        val opened = launch(ctx, i, "ok")
-        if (opened != "ok") return opened
-        Thread.sleep(6000)
-        val text = JarvisAccessibilityService.instance?.readScreenText() ?: ""
-        return if (text.isBlank()) {
-            "Ik kon de resultaten niet lezen."
-        } else {
-            "Zichtbare tekst op het scherm van $platform voor de zoekopdracht '$name'. " +
-                "Noem alleen profielen die hier echt in staan:\n" + text
-        }
+            ?: return "De Jarvis-toegankelijkheid staat uit, dus ik kan niet in apps tikken."
+        return block(svc)
     }
 
     private fun call(ctx: Context, to: String): String {
@@ -387,7 +396,9 @@ object Tools {
             it.loadLabel(pm).toString().contains(name, ignoreCase = true)
         } ?: return "Ik vind de app $name niet."
         val i = pm.getLaunchIntentForPackage(match.activityInfo.packageName) ?: return "Kan $name niet openen."
-        return launch(ctx, i, "$name is geopend.")
+        val res = launch(ctx, i, "$name is geopend.")
+        Thread.sleep(2500)
+        return res
     }
 
     private fun addEvent(ctx: Context, title: String, start: String, minutes: Int, remind: Int): String {
