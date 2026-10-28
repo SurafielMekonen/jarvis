@@ -46,6 +46,7 @@ class JarvisAccessibilityService : AccessibilityService() {
 
     /** Leest alle zichtbare tekst van het scherm dat nu open staat. */
     fun readScreenText(): String {
+        if (inBankApp()) return bankMsg
         val root = rootInActiveWindow ?: return ""
         val seen = LinkedHashSet<String>()
         collect(root, seen, 0)
@@ -59,6 +60,18 @@ class JarvisAccessibilityService : AccessibilityService() {
         if (!t.isNullOrEmpty()) out.add(t)
         else if (!d.isNullOrEmpty()) out.add(d)
         for (i in 0 until node.childCount) collect(node.getChild(i), out, depth + 1)
+    }
+
+    /** Bank- en betaalapps zijn verboden terrein: Jarvis opent ze hooguit, maar raakt ze nooit aan. */
+    private val blockedPackages = listOf(
+        "abnamro", "nl.abn", "com.ing.", "nl.ing.", "rabo", "bunq", "snsbank", "nl.sns", "asnbank", "regiobank",
+        "knab", "triodos", "revolut", "com.paypal", "tikkie", "walletnfcrel", "com.samsung.android.spay", "wise", "n26"
+    )
+    private val bankMsg = "Dit is een bankapp. Daar blijf ik helemaal van af."
+
+    private fun inBankApp(): Boolean {
+        val pkg = rootInActiveWindow?.packageName?.toString()?.lowercase() ?: return false
+        return blockedPackages.any { pkg.contains(it) }
     }
 
     class Item(val label: String, val rect: Rect, val clickable: Boolean, val editable: Boolean)
@@ -85,6 +98,7 @@ class JarvisAccessibilityService : AccessibilityService() {
 
     /** Geeft een genummerde lijst van wat er op het scherm staat. */
     fun describeScreen(): String {
+        if (inBankApp()) return bankMsg
         val root = rootInActiveWindow ?: return "Ik kan het scherm niet lezen."
         val list = ArrayList<Item>()
         scan(root, list, 0, false)
@@ -102,6 +116,7 @@ class JarvisAccessibilityService : AccessibilityService() {
     }
 
     fun tapAt(x: Float, y: Float): Boolean {
+        if (inBankApp()) return false
         val p = Path()
         p.moveTo(x, y)
         val g = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(p, 0, 70)).build()
@@ -109,11 +124,13 @@ class JarvisAccessibilityService : AccessibilityService() {
     }
 
     fun clickItem(n: Int): String {
+        if (inBankApp()) return bankMsg
         val it = items.getOrNull(n - 1) ?: return "Dat nummer bestaat niet. Lees eerst het scherm."
         return if (tapAt(it.rect.exactCenterX(), it.rect.exactCenterY())) "Geklikt op: " + it.label else "Klikken lukte niet."
     }
 
     fun clickText(text: String): String {
+        if (inBankApp()) return bankMsg
         val root = rootInActiveWindow ?: return "Ik kan het scherm niet lezen."
         val nodes = root.findAccessibilityNodeInfosByText(text)
         for (node in nodes) {
@@ -127,6 +144,7 @@ class JarvisAccessibilityService : AccessibilityService() {
     }
 
     fun typeInto(text: String, submit: Boolean): String {
+        if (inBankApp()) return bankMsg
         val root = rootInActiveWindow ?: return "Ik kan het scherm niet lezen."
         val field = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: findEditable(root)
             ?: return "Er is geen tekstveld. Tik eerst op het zoek- of typveld."
@@ -143,6 +161,7 @@ class JarvisAccessibilityService : AccessibilityService() {
     }
 
     fun scroll(down: Boolean): String {
+        if (inBankApp()) return bankMsg
         val m = resources.displayMetrics
         val x = m.widthPixels / 2f
         val p = Path()
@@ -184,6 +203,10 @@ class JarvisAccessibilityService : AccessibilityService() {
 
     private fun process() {
         val step = JarvisBridge.queue.peek() ?: return
+        if (inBankApp()) {
+            JarvisBridge.queue.clear()
+            return
+        }
         val root = rootInActiveWindow ?: return
         val done = when (step) {
             is Step.Click -> clickAny(root, step.labels)
