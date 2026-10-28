@@ -89,6 +89,18 @@ class MainActivity : Activity() {
             }
         }
 
+        val muteBtn = Button(this)
+        fun muteText() {
+            muteBtn.text = if (prefs.muteBeeps) "Piepjes dempen: AAN (tik om uit te zetten)" else "Piepjes dempen: UIT (tik om aan te zetten)"
+        }
+        muteText()
+        muteBtn.setOnClickListener {
+            prefs.muteBeeps = !prefs.muteBeeps
+            muteText()
+            Toast.makeText(this, "Stop en start Jarvis opnieuw om dit toe te passen.", Toast.LENGTH_LONG).show()
+        }
+        col.addView(muteBtn)
+
         label("Stap 2: testen")
         val testInput = EditText(this)
         testInput.hint = "Typ een opdracht, bijvoorbeeld: wat is 12 keer 12"

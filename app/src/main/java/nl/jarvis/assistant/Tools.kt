@@ -119,6 +119,22 @@ object Tools {
         )
         tools.put(
             tool(
+                "find_profiles",
+                "Zoek profielen/personen op een social-app (tiktok, instagram, x, facebook, linkedin, threads) en lees de zichtbare resultaten van het scherm. Geeft de gevonden namen terug.",
+                JSONObject()
+                    .put("platform", prop("string", "tiktok, instagram, x, facebook, linkedin of threads"))
+                    .put("name", prop("string", "Naam om te zoeken")),
+                listOf("platform", "name")
+            )
+        )
+        tools.put(
+            tool(
+                "read_screen", "Lees de tekst van het scherm dat nu open staat op de telefoon.",
+                JSONObject(), listOf()
+            )
+        )
+        tools.put(
+            tool(
                 "call_contact", "Bel een contactpersoon of nummer.",
                 JSONObject().put("to", prop("string", "Naam of nummer")),
                 listOf("to")
@@ -152,6 +168,8 @@ object Tools {
             "post_social" -> postSocial(ctx, a.getString("platform"), a.getString("text"))
             "send_social_message" -> sendSocialMessage(ctx, a.getString("platform"), a.getString("to"), a.getString("message"))
             "call_contact" -> call(ctx, a.getString("to"))
+            "find_profiles" -> findProfiles(ctx, a.getString("platform"), a.getString("name"))
+            "read_screen" -> readScreen()
             "set_timer" -> {
                 val i = Intent(AlarmClock.ACTION_SET_TIMER)
                     .putExtra(AlarmClock.EXTRA_LENGTH, a.getInt("seconds"))
@@ -297,6 +315,51 @@ object Tools {
         val pkg = socialPackages[p] ?: return "Berichten via $platform worden niet ondersteund."
         JarvisBridge.expectSteps(listOf(Step.Click(listOf(to)), Step.Click(sendLabels)), 30_000)
         return launch(ctx, shareIntent(pkg, msg), "Bericht aan $to wordt verstuurd via $platform.")
+    }
+
+    private fun readScreen(): String {
+        val svc = JarvisAccessibilityService.instance
+            ?: return "De Jarvis-toegankelijkheid staat uit, dus ik kan het scherm niet lezen."
+        val t = svc.readScreenText()
+        return if (t.isBlank()) "Ik zie geen tekst op het scherm." else t
+    }
+
+    /** Opent de zoekpagina voor profielen in de app en leest de zichtbare namen van het scherm. */
+    private fun findProfiles(ctx: Context, platform: String, name: String): String {
+        val p = platform.lowercase(Locale.ROOT)
+        val q = enc(name)
+        val url = when (p) {
+            "tiktok" -> "https://www.tiktok.com/search/user?q=$q"
+            "instagram" -> "https://www.instagram.com/explore/search/keyword/?q=$q"
+            "x", "twitter" -> "https://x.com/search?q=$q&f=user"
+            "facebook" -> "https://www.facebook.com/search/people/?q=$q"
+            "linkedin" -> "https://www.linkedin.com/search/results/people/?keywords=$q"
+            "threads" -> "https://www.threads.net/search?q=$q&serp_type=accounts"
+            else -> return "Profielen zoeken op $platform wordt niet ondersteund."
+        }
+        if (JarvisAccessibilityService.instance == null) {
+            return "De Jarvis-toegankelijkheid staat uit, dus ik kan de resultaten niet lezen."
+        }
+        val pkg = when (p) {
+            "tiktok" -> "com.zhiliaoapp.musically"
+            "instagram" -> "com.instagram.android"
+            "x", "twitter" -> "com.twitter.android"
+            "facebook" -> "com.facebook.katana"
+            "linkedin" -> "com.linkedin.android"
+            else -> "com.instagram.barcelona"
+        }
+        val i = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+        i.setPackage(pkg)
+        val opened = launch(ctx, i, "ok")
+        if (opened != "ok") return opened
+        Thread.sleep(6000)
+        val text = JarvisAccessibilityService.instance?.readScreenText() ?: ""
+        return if (text.isBlank()) {
+            "Ik kon de resultaten niet lezen."
+        } else {
+            "Zichtbare tekst op het scherm van $platform voor de zoekopdracht '$name'. " +
+                "Noem alleen profielen die hier echt in staan:\n" + text
+        }
     }
 
     private fun call(ctx: Context, to: String): String {

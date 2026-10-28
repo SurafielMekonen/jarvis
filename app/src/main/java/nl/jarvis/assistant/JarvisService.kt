@@ -7,6 +7,7 @@ import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
+import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -35,6 +36,34 @@ class JarvisService : Service() {
     private var busy = false
     private var stopped = false
     private var woke = false
+    private var muted = false
+    private var followUp = false
+
+    private val acks = listOf("Ja hoor.", "Oké.", "Momentje.", "Mm-hm, even kijken.", "Ja, komt eraan.", "Tuurlijk.", "Goed.")
+
+    /** Dempt de piepjes van de spraakherkenning terwijl Jarvis luistert. */
+    private fun setMuted(on: Boolean) {
+        if (on == muted) return
+        if (on && !Prefs(this).muteBeeps) return
+        muted = on
+        val am = getSystemService(AudioManager::class.java)
+        val dir = if (on) AudioManager.ADJUST_MUTE else AudioManager.ADJUST_UNMUTE
+        for (stream in intArrayOf(AudioManager.STREAM_NOTIFICATION, AudioManager.STREAM_SYSTEM, AudioManager.STREAM_MUSIC)) {
+            try {
+                am.adjustStreamVolume(stream, dir, 0)
+            } catch (e: Exception) {
+                // sommige telefoons staan dit niet toe
+            }
+        }
+    }
+
+    private fun startFollowUp() {
+        followUp = false
+        main.removeCallbacks(speakWatchdog)
+        woke = true
+        JarvisUi.show(this, OrbState.LISTENING, "Ik luister…")
+        listen(false)
+    }
 
     private val wakeWords = listOf(
         "jarvis", "jarvies", "harvis", "jervis", "jarvist", "tarvis", "jarvus",
@@ -110,14 +139,27 @@ class JarvisService : Service() {
             override fun onStart(utteranceId: String?) {}
 
             override fun onDone(utteranceId: String?) {
-                main.post { finishTurn(1200) }
+                main.post {
+                    when (utteranceId) {
+                        "reply" -> if (followUp) startFollowUp() else finishTurn(1200)
+                        "listen" -> {
+                            main.removeCallbacks(speakWatchdog)
+                            listen(false)
+                        }
+                        else -> {}
+                    }
+                }
             }
 
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String?) {
                 main.post {
                     JLog.add("Fout tijdens praten")
-                    finishTurn(1200)
+                    when (utteranceId) {
+                        "reply" -> finishTurn(1200)
+                        "listen" -> listen(false)
+                        else -> {}
+                    }
                 }
             }
         })
@@ -200,8 +242,15 @@ class JarvisService : Service() {
                     } else if (command.isBlank()) {
                         busy = true
                         woke = true
-                        JarvisUi.show(this@JarvisService, OrbState.LISTENING, "Ik luister…")
-                        listen(false)
+                        JarvisUi.show(this@JarvisService, OrbState.LISTENING, "Ja?")
+                        if (ttsReady) {
+                            setMuted(false)
+                            main.removeCallbacks(speakWatchdog)
+                            main.postDelayed(speakWatchdog, 12_000L)
+                            tts?.speak("Ja?", TextToSpeech.QUEUE_FLUSH, null, "listen")
+                        } else {
+                            listen(false)
+                        }
                     } else {
                         process(command)
                     }
@@ -284,7 +333,9 @@ class JarvisService : Service() {
         intent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
         if (!wakeMode) {
             intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
+            intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
         }
+        setMuted(true)
         try {
             r.startListening(intent)
         } catch (e: Exception) {
@@ -312,6 +363,10 @@ class JarvisService : Service() {
         busy = true
         JLog.add("Opdracht: $text")
         JarvisUi.show(this, OrbState.THINKING, text)
+        main.removeCallbacks(speakWatchdog)
+        main.postDelayed(speakWatchdog, 90_000L)
+        setMuted(false)
+        if (ttsReady) tts?.speak(acks.random(), TextToSpeech.QUEUE_FLUSH, null, "ack")
         Thread {
             val reply = try {
                 Brain.ask(applicationContext, text)
@@ -331,9 +386,11 @@ class JarvisService : Service() {
             finishTurn(3500)
             return
         }
+        followUp = reply.trimEnd().endsWith("?")
+        setMuted(false)
         main.removeCallbacks(speakWatchdog)
-        main.postDelayed(speakWatchdog, 30_000L)
-        val res = engine.speak(reply, TextToSpeech.QUEUE_FLUSH, null, "reply")
+        main.postDelayed(speakWatchdog, 60_000L)
+        val res = engine.speak(reply, TextToSpeech.QUEUE_ADD, null, "reply")
         if (res != TextToSpeech.SUCCESS) {
             JLog.add("Praten mislukt")
             finishTurn(3500)
@@ -347,6 +404,7 @@ class JarvisService : Service() {
         main.removeCallbacksAndMessages(null)
         JarvisUi.hide(0)
         destroyRecognizer()
+        setMuted(false)
         tts?.shutdown()
         JLog.add("Jarvis gestopt")
         super.onDestroy()

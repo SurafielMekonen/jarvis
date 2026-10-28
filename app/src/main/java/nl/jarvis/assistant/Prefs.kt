@@ -17,6 +17,12 @@ class Prefs(context: Context) {
             sp.edit().putString("model", v.trim().ifEmpty { DEFAULT_MODEL }).apply()
         }
 
+    var muteBeeps: Boolean
+        get() = sp.getBoolean("mute_beeps", true)
+        set(v) {
+            sp.edit().putBoolean("mute_beeps", v).apply()
+        }
+
     companion object {
         const val DEFAULT_MODEL = "claude-sonnet-5-5"
     }

@@ -27,6 +27,7 @@
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
         <package android:name="com.whatsapp" />
+        <package android:name="com.zhiliaoapp.musically" />
         <package android:name="com.twitter.android" />
         <package android:name="com.linkedin.android" />
         <package android:name="com.facebook.katana" />

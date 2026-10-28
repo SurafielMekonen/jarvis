@@ -31,6 +31,33 @@ object JarvisBridge {
 class JarvisAccessibilityService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
 
+    override fun onServiceConnected() {
+        super.onServiceConnected()
+        instance = this
+    }
+
+    override fun onUnbind(intent: android.content.Intent?): Boolean {
+        if (instance === this) instance = null
+        return super.onUnbind(intent)
+    }
+
+    /** Leest alle zichtbare tekst van het scherm dat nu open staat. */
+    fun readScreenText(): String {
+        val root = rootInActiveWindow ?: return ""
+        val seen = LinkedHashSet<String>()
+        collect(root, seen, 0)
+        return seen.joinToString("\n").take(2500)
+    }
+
+    private fun collect(node: AccessibilityNodeInfo?, out: MutableSet<String>, depth: Int) {
+        if (node == null || depth > 40 || out.size > 200) return
+        val t = node.text?.toString()?.trim()
+        val d = node.contentDescription?.toString()?.trim()
+        if (!t.isNullOrEmpty()) out.add(t)
+        else if (!d.isNullOrEmpty()) out.add(d)
+        for (i in 0 until node.childCount) collect(node.getChild(i), out, depth + 1)
+    }
+
     private val tick = object : Runnable {
         override fun run() {
             process()
@@ -88,4 +115,9 @@ class JarvisAccessibilityService : AccessibilityService() {
     }
 
     override fun onInterrupt() {}
+
+    companion object {
+        @Volatile
+        var instance: JarvisAccessibilityService? = null
+    }
 }
