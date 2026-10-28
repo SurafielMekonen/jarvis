@@ -148,15 +148,14 @@ class MainActivity : Activity() {
         }
         col.addView(muteBtn)
 
-        val langBtn = Button(this)
-        fun langText() { langBtn.text = "Taal: " + (if (prefs.language == "en") "Engels (tik voor Nederlands)" else "Nederlands (tik voor Engels)") }
-        langText()
-        langBtn.setOnClickListener {
-            prefs.language = if (prefs.language == "en") "nl" else "en"
-            langText()
-            Toast.makeText(this, "Stop en start Jarvis opnieuw om dit toe te passen.", Toast.LENGTH_LONG).show()
+        label("Spraaktaal (taalcode, bijv. nl-NL, en-US, ar-SA, fr-FR, de-DE, es-ES, zh-CN, ja-JP). Dit is de taal waarin je tegen Jarvis praat; hij antwoordt altijd in de taal die jij gebruikt, ongeacht dit veld.")
+        val langField = EditText(this)
+        langField.setText(prefs.language)
+        col.addView(langField)
+        button("Spraaktaal opslaan") {
+            prefs.language = langField.text.toString()
+            Toast.makeText(this, "Opgeslagen. Stop en start Jarvis opnieuw.", Toast.LENGTH_LONG).show()
         }
-        col.addView(langBtn)
 
         button("Andere stem proberen (kies een mannelijke)") {
             var eng: TextToSpeech? = null
@@ -166,9 +165,10 @@ class MainActivity : Activity() {
                     if (st != TextToSpeech.SUCCESS || e == null) {
                         Toast.makeText(this, "Stem starten mislukt.", Toast.LENGTH_LONG).show()
                     } else {
-                        val nl = e.voices?.filter { it.locale.language == "nl" }?.sortedBy { it.name } ?: emptyList()
+                        val wantLang = prefs.language.substringBefore("-")
+                        val nl = e.voices?.filter { it.locale.language == wantLang }?.sortedBy { it.name } ?: emptyList()
                         if (nl.isEmpty()) {
-                            Toast.makeText(this, "Geen Nederlandse stemmen gevonden. Gebruik Stem-instellingen.", Toast.LENGTH_LONG).show()
+                            Toast.makeText(this, "Geen stemmen gevonden voor deze taal. Gebruik Stem-instellingen.", Toast.LENGTH_LONG).show()
                         } else {
                             val idx = (nl.indexOfFirst { it.name == prefs.voiceName } + 1) % nl.size
                             val v = nl[idx]

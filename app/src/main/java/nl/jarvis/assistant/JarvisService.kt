@@ -244,7 +244,7 @@ class JarvisService : Service() {
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                 .build()
         )
-        val wantLocale = if (Prefs(this).language == "en") Locale("en", "US") else Locale("nl", "NL")
+        val wantLocale = Locale.forLanguageTag(Prefs(this).language)
         var r = engine.setLanguage(wantLocale)
         if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
             JLog.add("Stem voor deze taal ontbreekt, ik probeer de standaardtaal van je telefoon")
@@ -252,7 +252,7 @@ class JarvisService : Service() {
         }
         try {
             val wanted = Prefs(this).voiceName
-            val lang = Prefs(this).language
+            val lang = wantLocale.language
             val nl = engine.voices?.filter { it.locale.language == lang } ?: emptyList()
             val pick = (if (wanted.isNotEmpty()) nl.firstOrNull { it.name == wanted } else null)
                 ?: nl.firstOrNull { Regex("(?<!fe)male", RegexOption.IGNORE_CASE).containsMatchIn(it.name) }
@@ -460,7 +460,7 @@ class JarvisService : Service() {
         }
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, if (Prefs(this).language == "en") "en-US" else "nl-NL")
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Prefs(this).language)
         intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
         intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
         intent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)

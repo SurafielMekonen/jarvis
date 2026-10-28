@@ -36,11 +36,11 @@ class Prefs(context: Context) {
             sp.edit().putString("memory", v).apply()
         }
 
-    /** "nl" of "en" */
+    /** Taalcode voor spraak, bijvoorbeeld nl-NL, en-US, ar-SA, es-ES, fr-FR, de-DE, zh-CN, ja-JP. */
     var language: String
-        get() = sp.getString("language", "nl") ?: "nl"
+        get() = sp.getString("language", "nl-NL") ?: "nl-NL"
         set(v) {
-            sp.edit().putString("language", v).apply()
+            sp.edit().putString("language", v.trim().ifEmpty { "nl-NL" }).apply()
         }
 
     var azureKey: String
