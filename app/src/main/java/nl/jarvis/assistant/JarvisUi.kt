@@ -2,6 +2,7 @@ package nl.jarvis.assistant
 
 import android.app.KeyguardManager
 import android.content.Context
+import android.content.Intent
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.DashPathEffect
@@ -174,7 +175,9 @@ object JarvisUi {
             intArrayOf(0xF2061428.toInt(), 0xCC061428.toInt(), 0x00061428)
         )
         layout.setPadding((24 * d).toInt(), (40 * d).toInt(), (24 * d).toInt(), (16 * d).toInt())
-        layout.setOnClickListener { hideOnMain() }
+        layout.setOnClickListener {
+            ctx.startService(Intent(ctx, JarvisService::class.java).setAction(JarvisService.ACTION_INTERRUPT))
+        }
 
         val tv = TextView(ctx)
         tv.setTextColor(Color.WHITE)

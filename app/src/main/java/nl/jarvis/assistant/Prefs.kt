@@ -36,6 +36,13 @@ class Prefs(context: Context) {
             sp.edit().putString("memory", v).apply()
         }
 
+    /** "nl" of "en" */
+    var language: String
+        get() = sp.getString("language", "nl") ?: "nl"
+        set(v) {
+            sp.edit().putString("language", v).apply()
+        }
+
     companion object {
         const val DEFAULT_MODEL = "claude-sonnet-5-5"
     }

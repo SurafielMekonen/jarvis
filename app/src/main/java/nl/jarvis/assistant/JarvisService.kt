@@ -28,6 +28,10 @@ import java.util.Locale
  */
 class JarvisService : Service() {
 
+    companion object {
+        const val ACTION_INTERRUPT = "nl.jarvis.assistant.INTERRUPT"
+    }
+
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     private var recognizer: SpeechRecognizer? = null
@@ -146,14 +150,16 @@ class JarvisService : Service() {
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                 .build()
         )
-        var r = engine.setLanguage(Locale("nl", "NL"))
+        val wantLocale = if (Prefs(this).language == "en") Locale("en", "US") else Locale("nl", "NL")
+        var r = engine.setLanguage(wantLocale)
         if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
-            JLog.add("Nederlandse stem ontbreekt, ik probeer de standaardtaal van je telefoon")
+            JLog.add("Stem voor deze taal ontbreekt, ik probeer de standaardtaal van je telefoon")
             r = engine.setLanguage(Locale.getDefault())
         }
         try {
             val wanted = Prefs(this).voiceName
-            val nl = engine.voices?.filter { it.locale.language == "nl" } ?: emptyList()
+            val lang = Prefs(this).language
+            val nl = engine.voices?.filter { it.locale.language == lang } ?: emptyList()
             val pick = (if (wanted.isNotEmpty()) nl.firstOrNull { it.name == wanted } else null)
                 ?: nl.firstOrNull { Regex("(?<!fe)male", RegexOption.IGNORE_CASE).containsMatchIn(it.name) }
             if (pick != null) {
@@ -373,7 +379,7 @@ class JarvisService : Service() {
         }
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "nl-NL")
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, if (Prefs(this).language == "en") "en-US" else "nl-NL")
         intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
         intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
         intent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
@@ -423,6 +429,16 @@ class JarvisService : Service() {
         }.start()
     }
 
+    /** Onderbreekt Jarvis meteen: stopt met praten en gaat weer luisteren. Gekoppeld aan een tik op de ring. */
+    fun interrupt() {
+        if (!busy) return
+        JLog.add("Onderbroken door tik op de ring")
+        tts?.stop()
+        main.removeCallbacks(speakWatchdog)
+        followUp = false
+        finishTurn(0)
+    }
+
     private fun speak(reply: String) {
         JLog.add("Antwoord: $reply")
         JarvisUi.show(this, OrbState.SPEAKING, reply)
@@ -444,7 +460,10 @@ class JarvisService : Service() {
         }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_INTERRUPT) interrupt()
+        return START_STICKY
+    }
 
     override fun onDestroy() {
         stopped = true

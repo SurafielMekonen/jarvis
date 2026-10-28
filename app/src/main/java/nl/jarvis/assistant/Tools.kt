@@ -129,6 +129,10 @@ object Tools {
             JSONObject().put("direction", prop("string", "down of up")), listOf("direction")))
         tools.put(tool("press_button", "Druk op een knop van de telefoon: back, home of recents.",
             JSONObject().put("button", prop("string", "back, home of recents")), listOf("button")))
+        tools.put(tool("check_message_safety",
+            "Beoordeel een bericht, e-mail of link die de gebruiker voorleest of plakt op phishing, oplichting of andere veiligheidsrisico's. " +
+                "Gebruik dit alleen als de gebruiker daar expliciet om vraagt (bijvoorbeeld 'is dit veilig', 'lijkt dit verdacht').",
+            JSONObject().put("text", prop("string", "De tekst van het bericht, de mail of de link")), listOf("text")))
         tools.put(tool("remember", "Onthoud iets blijvend om steeds beter te worden: voorkeuren, namen en bijnamen, correcties van de gebruiker, en wat in een app werkte.",
             JSONObject().put("note", prop("string", "Korte notitie, één zin")), listOf("note")))
         tools.put(tool("forget", "Vergeet een eerder onthouden notitie.",
@@ -180,6 +184,7 @@ object Tools {
             "type_text" -> ui { val r = it.typeInto(a.getString("text"), a.optBoolean("submit", false)); Thread.sleep(2200); r + "\n" + it.describeScreen() }
             "scroll" -> ui { val r = it.scroll(a.optString("direction", "down") != "up"); Thread.sleep(1200); r + "\n" + it.describeScreen() }
             "press_button" -> ui { val r = it.press(a.getString("button")); Thread.sleep(1500); r + "\n" + it.describeScreen() }
+            "check_message_safety" -> a.getString("text") // Claude beoordeelt dit zelf aan de hand van de tekst, geen tool-logica nodig
             "remember" -> Memory.add(ctx, a.getString("note"))
             "forget" -> Memory.forget(ctx, a.getString("contains"))
             "lock_screen" -> {

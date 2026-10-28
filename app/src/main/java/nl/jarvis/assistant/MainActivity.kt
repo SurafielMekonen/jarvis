@@ -101,6 +101,16 @@ class MainActivity : Activity() {
         }
         col.addView(muteBtn)
 
+        val langBtn = Button(this)
+        fun langText() { langBtn.text = "Taal: " + (if (prefs.language == "en") "Engels (tik voor Nederlands)" else "Nederlands (tik voor Engels)") }
+        langText()
+        langBtn.setOnClickListener {
+            prefs.language = if (prefs.language == "en") "nl" else "en"
+            langText()
+            Toast.makeText(this, "Stop en start Jarvis opnieuw om dit toe te passen.", Toast.LENGTH_LONG).show()
+        }
+        col.addView(langBtn)
+
         button("Andere stem proberen (kies een mannelijke)") {
             var eng: TextToSpeech? = null
             eng = TextToSpeech(applicationContext) { st ->
