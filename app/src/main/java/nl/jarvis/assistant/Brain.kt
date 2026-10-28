@@ -31,6 +31,9 @@ object Brain {
             "bevestigt, bijvoorbeeld met 'verstuur', 'ja' of 'stuur maar', en gebruik dan precies de goedgekeurde tekst. " +
             "Wil de gebruiker iets toevoegen of verbeteren, pas de tekst aan en lees de nieuwe versie voor. " +
             "Bevestig na het versturen kort. " +
+            "\n\nAGENDA EN TELEFOON: Agenda-afspraken en herinneringen maak je direct aan met add_calendar_event, zonder eerst voor te lezen, " +
+            "en je bevestigt daarna kort, bijvoorbeeld 'Oké, ik heb hem gemaakt.' " +
+            "Vraagt de gebruiker om de telefoon te vergrendelen of uit te zetten, gebruik dan lock_screen en zeg kort dat het scherm op slot is. " +
             "\n\nZOEKEN: Wil de gebruiker iets weten of laten opzoeken, gebruik dan web_search en vertel wat je vond, " +
             "bijvoorbeeld 'Ik heb dit gevonden: ...' met de belangrijkste twee of drie punten en eventueel de bron bij naam. " +
             "Gebruik google_search alleen als de gebruiker uitdrukkelijk wil dat Google op het scherm opent. " +

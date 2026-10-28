@@ -79,7 +79,8 @@ object Tools {
                 JSONObject()
                     .put("title", prop("string", "Titel"))
                     .put("start", prop("string", "Starttijd in lokale tijd, formaat 2026-10-16T14:30"))
-                    .put("duration_minutes", prop("integer", "Duur in minuten, standaard 60")),
+                    .put("duration_minutes", prop("integer", "Duur in minuten, standaard 60"))
+                    .put("remind_minutes_before", prop("integer", "Herinnering zoveel minuten van tevoren, standaard 10")),
                 listOf("title", "start")
             )
         )
@@ -129,6 +130,12 @@ object Tools {
         )
         tools.put(
             tool(
+                "lock_screen", "Vergrendel het scherm van de telefoon (ook te gebruiken als de gebruiker vraagt de telefoon uit te zetten).",
+                JSONObject(), listOf()
+            )
+        )
+        tools.put(
+            tool(
                 "read_screen", "Lees de tekst van het scherm dat nu open staat op de telefoon.",
                 JSONObject(), listOf()
             )
@@ -162,7 +169,7 @@ object Tools {
                 Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=" + enc(a.getString("query")))),
                 "Zoeken gestart."
             )
-            "add_calendar_event" -> addEvent(ctx, a.getString("title"), a.getString("start"), a.optInt("duration_minutes", 60))
+            "add_calendar_event" -> addEvent(ctx, a.getString("title"), a.getString("start"), a.optInt("duration_minutes", 60), a.optInt("remind_minutes_before", 10))
             "read_calendar" -> readCalendar(ctx, a.optInt("days", 1))
             "open_app" -> openApp(ctx, a.getString("name"))
             "post_social" -> postSocial(ctx, a.getString("platform"), a.getString("text"))
@@ -170,6 +177,12 @@ object Tools {
             "call_contact" -> call(ctx, a.getString("to"))
             "find_profiles" -> findProfiles(ctx, a.getString("platform"), a.getString("name"))
             "read_screen" -> readScreen()
+            "lock_screen" -> {
+                val svc = JarvisAccessibilityService.instance
+                if (svc == null) "De Jarvis-toegankelijkheid staat uit, dus ik kan het scherm niet vergrendelen."
+                else if (svc.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN)) "Scherm vergrendeld."
+                else "Vergrendelen lukte niet."
+            }
             "set_timer" -> {
                 val i = Intent(AlarmClock.ACTION_SET_TIMER)
                     .putExtra(AlarmClock.EXTRA_LENGTH, a.getInt("seconds"))
@@ -377,7 +390,7 @@ object Tools {
         return launch(ctx, i, "$name is geopend.")
     }
 
-    private fun addEvent(ctx: Context, title: String, start: String, minutes: Int): String {
+    private fun addEvent(ctx: Context, title: String, start: String, minutes: Int, remind: Int): String {
         var calId: Long = -1L
         val cursor = ctx.contentResolver.query(
             CalendarContract.Calendars.CONTENT_URI,
@@ -404,8 +417,19 @@ object Tools {
         values.put(CalendarContract.Events.DTSTART, startMs)
         values.put(CalendarContract.Events.DTEND, startMs + minutes * 60_000L)
         values.put(CalendarContract.Events.EVENT_TIMEZONE, zone.id)
-        ctx.contentResolver.insert(CalendarContract.Events.CONTENT_URI, values)
-        return "Afspraak '$title' staat in je agenda."
+        values.put(CalendarContract.Events.HAS_ALARM, 1)
+        val uri = ctx.contentResolver.insert(CalendarContract.Events.CONTENT_URI, values)
+            ?: return "Het lukte niet om de afspraak op te slaan."
+        try {
+            val rv = ContentValues()
+            rv.put(CalendarContract.Reminders.EVENT_ID, ContentUris.parseId(uri))
+            rv.put(CalendarContract.Reminders.METHOD, CalendarContract.Reminders.METHOD_ALERT)
+            rv.put(CalendarContract.Reminders.MINUTES, remind)
+            ctx.contentResolver.insert(CalendarContract.Reminders.CONTENT_URI, rv)
+        } catch (e: Exception) {
+            return "Afspraak '$title' staat in je agenda, maar de herinnering lukte niet."
+        }
+        return "Afspraak '$title' staat in je agenda met een herinnering $remind minuten van tevoren."
     }
 
     private fun readCalendar(ctx: Context, days: Int): String {
