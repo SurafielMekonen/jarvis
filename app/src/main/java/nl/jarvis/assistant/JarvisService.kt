@@ -42,6 +42,9 @@ class JarvisService : Service() {
     private var woke = false
     private var muted = false
     private var followUp = false
+    private var mediaPlayer: android.media.MediaPlayer? = null
+    private val azureQueue = java.util.ArrayDeque<Pair<String, String>>()
+    private var azureBusy = false
 
     private val acks = listOf("Ja hoor.", "Oké.", "Momentje.", "Mm-hm, even kijken.", "Ja, komt eraan.", "Tuurlijk.", "Goed.")
 
@@ -80,6 +83,97 @@ class JarvisService : Service() {
             main.postDelayed({ if (!stopped) block() }, 350)
         } else {
             block()
+        }
+    }
+
+    /** Eén plek die bepaalt wat er gebeurt zodra een stukje spraak klaar is, ongeacht welke stem het was. */
+    private fun onUtteranceDone(utteranceId: String?) {
+        when (utteranceId) {
+            "reply" -> if (followUp) startFollowUp() else finishTurn(250)
+            "listen" -> {
+                main.removeCallbacks(speakWatchdog)
+                listen(false)
+            }
+            else -> {}
+        }
+    }
+
+    /** Spreekt tekst uit: via Azure als die is ingesteld (natuurlijke stem), anders de ingebouwde stem. */
+    private fun sayText(text: String, utteranceId: String, flush: Boolean) {
+        val key = Prefs(this).azureKey
+        if (key.isBlank()) {
+            val mode = if (flush) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+            tts?.speak(text, mode, null, utteranceId)
+            return
+        }
+        if (flush) {
+            azureQueue.clear()
+            try {
+                mediaPlayer?.stop()
+            } catch (e: Exception) {
+                // negeren
+            }
+        }
+        azureQueue.add(text to utteranceId)
+        pumpAzureQueue()
+    }
+
+    private fun pumpAzureQueue() {
+        if (azureBusy) return
+        val next = azureQueue.pollFirst() ?: return
+        azureBusy = true
+        val prefs = Prefs(this)
+        Thread {
+            val audio = AzureTts.synthesize(prefs.azureKey, prefs.azureRegion, next.first, prefs.language)
+            main.post {
+                if (audio == null) {
+                    JLog.add("Azure-stem mislukt, ik val terug op de ingebouwde stem")
+                    azureBusy = false
+                    tts?.speak(next.first, TextToSpeech.QUEUE_FLUSH, null, next.second)
+                } else {
+                    playAzureBytes(audio, next.second)
+                }
+            }
+        }.start()
+    }
+
+    private fun playAzureBytes(bytes: ByteArray, utteranceId: String) {
+        try {
+            val f = java.io.File.createTempFile("jarvis_tts", ".mp3", cacheDir)
+            f.writeBytes(bytes)
+            val mp = android.media.MediaPlayer()
+            mediaPlayer = mp
+            mp.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+            mp.setDataSource(f.absolutePath)
+            mp.setOnPreparedListener { it.start() }
+            mp.setOnCompletionListener {
+                it.release()
+                f.delete()
+                mediaPlayer = null
+                azureBusy = false
+                onUtteranceDone(utteranceId)
+                pumpAzureQueue()
+            }
+            mp.setOnErrorListener { mpv, _, _ ->
+                mpv.release()
+                f.delete()
+                mediaPlayer = null
+                azureBusy = false
+                JLog.add("Afspelen van de Azure-stem mislukte")
+                onUtteranceDone(utteranceId)
+                pumpAzureQueue()
+                true
+            }
+            mp.prepareAsync()
+        } catch (e: Exception) {
+            azureBusy = false
+            JLog.add("Azure-audio afspelen mislukt: " + e.message)
+            onUtteranceDone(utteranceId)
         }
     }
 
@@ -180,27 +274,14 @@ class JarvisService : Service() {
             }
 
             override fun onDone(utteranceId: String?) {
-                main.post {
-                    when (utteranceId) {
-                        "reply" -> if (followUp) startFollowUp() else finishTurn(250)
-                        "listen" -> {
-                            main.removeCallbacks(speakWatchdog)
-                            listen(false)
-                        }
-                        else -> {}
-                    }
-                }
+                main.post { onUtteranceDone(utteranceId) }
             }
 
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String?) {
                 main.post {
                     JLog.add("Fout tijdens praten")
-                    when (utteranceId) {
-                        "reply" -> finishTurn(1200)
-                        "listen" -> listen(false)
-                        else -> {}
-                    }
+                    onUtteranceDone(utteranceId)
                 }
             }
         })
@@ -295,7 +376,7 @@ class JarvisService : Service() {
                         if (ttsReady) {
                             main.removeCallbacks(speakWatchdog)
                             main.postDelayed(speakWatchdog, 12_000L)
-                            whenAudible { tts?.speak("Ja?", TextToSpeech.QUEUE_FLUSH, null, "listen") }
+                            whenAudible { sayText("Ja?", "listen", true) }
                         } else {
                             listen(false)
                         }

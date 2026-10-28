@@ -36,7 +36,9 @@ jobs:
           gradle-version: 8.9
 
       - name: Bouw debug-APK
-        run: gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
+        run: |
+          set -o pipefail
+          gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
 
       - name: Fouten zichtbaar maken
         if: failure()
